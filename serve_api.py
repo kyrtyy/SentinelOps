@@ -85,6 +85,22 @@ class InvestigateRequest(BaseModel):
     max_turns: Optional[int] = 6
 
 
+class ChatMessage(BaseModel):
+    role: str
+    content: Optional[str] = ""
+    name: Optional[str] = None
+    tool_calls: Optional[List[Dict[str, Any]]] = None
+
+
+class ChatCompletionRequest(BaseModel):
+    model: Optional[str] = "sentinelops"
+    messages: List[Dict[str, Any]]
+    tools: Optional[List[Dict[str, Any]]] = None
+    temperature: Optional[float] = 0.2
+    top_p: Optional[float] = 0.9
+    max_tokens: Optional[int] = 512
+
+
 @app.get("/", response_class=HTMLResponse)
 def index_dashboard():
     return """
