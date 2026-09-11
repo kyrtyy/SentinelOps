@@ -9,11 +9,10 @@ datasets>=3.0
 pyyaml>=6.0
 wandb>=0.18
 
-# Flash Attention 2 - build against your installed torch/CUDA version.
-# If this wheel build fails, drop --attn_implementation to "sdpa" in
-# configs/train_lora_config.yaml and skip this line; training still
-# works, just somewhat slower.
-flash-attn>=2.6 --no-build-isolation
+# Flash Attention 2 is optional. If installing from source on CUDA:
+#   pip install flash-attn>=2.6 --no-build-isolation
+# If you don't install flash-attn, PyTorch will use built-in SDPA (native scaled dot-product attention).
+flash-attn>=2.6; platform_system != "Darwin"
 
 # NOTE: trl moves fast and has broken backward compatibility on
 # SFTConfig kwargs more than once (e.g. max_seq_length -> max_length).

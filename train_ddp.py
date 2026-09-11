@@ -73,11 +73,23 @@ def main():
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
-    model = AutoModelForCausalLM.from_pretrained(
-        model_cfg["name_or_path"],
-        dtype=torch.bfloat16,
-        attn_implementation=model_cfg.get("attn_implementation", "flash_attention_2"),
-    )
+    attn_impl = model_cfg.get("attn_implementation", "flash_attention_2")
+    try:
+        model = AutoModelForCausalLM.from_pretrained(
+            model_cfg["name_or_path"],
+            torch_dtype=torch.bfloat16,
+            attn_implementation=attn_impl,
+        )
+    except Exception as e:
+        if attn_impl == "flash_attention_2":
+            print(f"Warning: flash_attention_2 failed to load ({e}). Falling back to native PyTorch 'sdpa'...")
+            model = AutoModelForCausalLM.from_pretrained(
+                model_cfg["name_or_path"],
+                torch_dtype=torch.bfloat16,
+                attn_implementation="sdpa",
+            )
+        else:
+            raise
 
     peft_config = LoraConfig(
         r=lora_cfg["r"],
