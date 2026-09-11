@@ -59,6 +59,7 @@ module "rds_pgvector" {
   db_username                = var.db_username
   db_password                = var.db_password
   instance_class             = var.db_instance_class
+  backup_retention_period    = var.db_backup_retention_period
   environment                = var.environment
 }
 

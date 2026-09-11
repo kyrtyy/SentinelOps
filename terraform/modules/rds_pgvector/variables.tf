@@ -33,14 +33,20 @@ variable "db_password" {
 
 variable "instance_class" {
   type        = string
-  default     = "db.t4g.medium"
-  description = "RDS instance class (Graviton t4g.medium recommended for cost-efficiency)"
+  default     = "db.t4g.micro"
+  description = "RDS instance class (db.t4g.micro is Free Tier eligible)"
 }
 
 variable "allocated_storage" {
   type        = number
   default     = 20
   description = "Allocated storage in GB"
+}
+
+variable "backup_retention_period" {
+  type        = number
+  default     = 1
+  description = "Backup retention period in days (1 for Free Tier compliance)"
 }
 
 variable "environment" {

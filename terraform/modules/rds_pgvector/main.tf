@@ -74,7 +74,7 @@ resource "aws_db_instance" "postgres" {
   deletion_protection    = false
   publicly_accessible    = false
 
-  backup_retention_period = 7
+  backup_retention_period = var.backup_retention_period
 
   tags = {
     Name        = "sentinelops-runbooks-pgvector-${var.environment}"

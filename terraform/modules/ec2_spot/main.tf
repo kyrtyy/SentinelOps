@@ -66,6 +66,21 @@ resource "aws_security_group" "model_server" {
   }
 }
 
+data "aws_ami" "ubuntu" {
+  most_recent = true
+  owners      = ["099720109477"] # Canonical
+
+  filter {
+    name   = "name"
+    values = ["ubuntu/images/hvm-ssd/ubuntu-jammy-22.04-amd64-server-*"]
+  }
+
+  filter {
+    name   = "virtualization-type"
+    values = ["hvm"]
+  }
+}
+
 data "aws_ami" "deep_learning" {
   most_recent = true
   owners      = ["amazon"]
@@ -76,8 +91,13 @@ data "aws_ami" "deep_learning" {
   }
 }
 
+locals {
+  is_gpu      = can(regex("^(g|p)[0-9]", var.instance_type))
+  selected_ami = local.is_gpu ? data.aws_ami.deep_learning.id : data.aws_ami.ubuntu.id
+}
+
 resource "aws_instance" "gpu_server" {
-  ami                  = var.ami_id != "" ? var.ami_id : data.aws_ami.deep_learning.id
+  ami                  = var.ami_id != "" ? var.ami_id : local.selected_ami
   instance_type        = var.instance_type
   subnet_id            = var.subnet_id
   vpc_security_group_ids = [aws_security_group.model_server.id]

@@ -72,6 +72,12 @@ variable "db_password" {
 
 variable "db_instance_class" {
   type        = string
-  default     = "db.t4g.medium"
-  description = "RDS instance class"
+  default     = "db.t4g.micro"
+  description = "RDS instance class (db.t4g.micro is Free Tier eligible)"
+}
+
+variable "db_backup_retention_period" {
+  type        = number
+  default     = 1
+  description = "RDS backup retention period in days (1 for Free Tier compliance)"
 }
