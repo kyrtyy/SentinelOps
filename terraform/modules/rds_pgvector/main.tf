@@ -14,12 +14,11 @@ resource "aws_db_subnet_group" "rds" {
 resource "aws_db_parameter_group" "pgvector" {
   name        = "sentinelops-pgvector-params-${var.environment}"
   family      = "postgres16"
-  description = "Custom parameter group enabling pgvector extension"
+  description = "Custom parameter group for SentinelOps PostgreSQL 16 database"
 
   parameter {
-    name         = "shared_preload_libraries"
-    value        = "pgvector"
-    apply_method = "pending-reboot"
+    name  = "log_connections"
+    value = "1"
   }
 
   tags = {

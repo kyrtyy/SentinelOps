@@ -10,7 +10,7 @@ availability_zones  = ["us-east-1a", "us-east-1b"]
 
 # GPU Compute Configuration (EC2 Spot g5.xlarge = NVIDIA A10G 24GB)
 ec2_instance_type   = "g5.xlarge"
-ec2_key_name        = "my-ec2-key"
+ec2_key_name        = "" # Leave empty to connect via AWS Session Manager (recommended), or enter an existing key pair name
 admin_cidr_blocks   = ["203.0.113.50/32"] # Replace with your IP for secure SSH access
 
 # RDS PostgreSQL pgvector Configuration
