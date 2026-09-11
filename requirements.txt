@@ -9,10 +9,9 @@ datasets>=3.0
 pyyaml>=6.0
 wandb>=0.18
 
-# Flash Attention 2 is optional. If installing from source on CUDA:
-#   pip install flash-attn>=2.6 --no-build-isolation
-# If you don't install flash-attn, PyTorch will use built-in SDPA (native scaled dot-product attention).
-flash-attn>=2.6; platform_system != "Darwin"
+# Flash Attention 2 is optional. PyTorch uses built-in SDPA by default.
+# To optionally install flash-attn after torch is installed:
+#   pip install flash-attn --no-build-isolation
 
 # NOTE: trl moves fast and has broken backward compatibility on
 # SFTConfig kwargs more than once (e.g. max_seq_length -> max_length).
