@@ -8,10 +8,10 @@ larger model acting as judge.
 
 ## Status
 
-- [x] **Training pipeline** - synthetic incident dataset generation, LoRA SFT
-- [ ] Quantization (AWQ) + vLLM serving
+- [x] **Training pipeline** - open-source & synthetic incident dataset, LoRA SFT (PyTorch DDP)
+- [x] **Model serving** - OpenAI-compatible server (`serve_api.py`), AWQ INT4 support
+- [x] **Agent orchestrator** - Autonomous multi-turn ReAct loop (`agent_orchestrator.py`), tool execution & RAG runbooks
 - [ ] Infrastructure (Terraform: VPC, EC2 spot, RDS+pgvector, Lambda, EventBridge)
-- [ ] Agent orchestrator (ReAct loop, tool execution)
 - [ ] Evaluation (Bedrock Claude 3.5 Sonnet as judge, latency/throughput benchmarks)
 
 ## Architecture at a glance
