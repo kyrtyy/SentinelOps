@@ -78,6 +78,6 @@ variable "db_instance_class" {
 
 variable "db_backup_retention_period" {
   type        = number
-  default     = 1
-  description = "RDS backup retention period in days (1 for Free Tier compliance)"
+  default     = 0
+  description = "RDS backup retention period in days (0 disables automated snapshots for Free Tier accounts)"
 }

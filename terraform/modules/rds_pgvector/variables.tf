@@ -45,8 +45,8 @@ variable "allocated_storage" {
 
 variable "backup_retention_period" {
   type        = number
-  default     = 1
-  description = "Backup retention period in days (1 for Free Tier compliance)"
+  default     = 0
+  description = "Backup retention period in days (0 disables automated snapshots for Free Tier accounts)"
 }
 
 variable "environment" {
