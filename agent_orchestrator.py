@@ -184,49 +184,40 @@ def call_model_api(api_base, messages, tools):
 
 
 def extract_tool_calls_from_text(text: str):
-    import re
     if not text:
         return []
     cleaned = text.replace("<|im_start|>", "").replace("<|im_end|>", "").replace("<|endoftext|>", "").strip()
-    calls = []
+    results = []
+    start_idx = -1
+    brace_count = 0
+    in_string = False
+    escape = False
 
-    # 1. Tagged <tool_call>...</tool_call>
-    tagged_matches = re.findall(r'<tool_call>(.*?)</tool_call>', cleaned, re.DOTALL)
-    for m in tagged_matches:
-        try:
-            data = json.loads(m.strip())
-            if "name" in data:
-                calls.append(data)
-        except Exception:
-            pass
-
-    if calls:
-        return calls
-
-    # 2. Markdown json blocks
-    md_matches = re.findall(r'```(?:json)?\s*(\{.*?\})\s*```', cleaned, re.DOTALL)
-    for m in md_matches:
-        try:
-            data = json.loads(m.strip())
-            if "name" in data and "arguments" in data:
-                calls.append(data)
-        except Exception:
-            pass
-
-    if calls:
-        return calls
-
-    # 3. Direct or embedded JSON with "name" and "arguments"
-    match = re.search(r'(\{[\s\S]*?"name"[\s\S]*?"arguments"[\s\S]*?\})', cleaned)
-    if match:
-        try:
-            data = json.loads(match.group(1))
-            if "name" in data and "arguments" in data:
-                calls.append(data)
-        except Exception:
-            pass
-
-    return calls
+    for i, ch in enumerate(cleaned):
+        if ch == '"' and not escape:
+            in_string = not in_string
+        elif ch == '\\' and in_string:
+            escape = not escape
+            continue
+        elif not in_string:
+            if ch == '{':
+                if brace_count == 0:
+                    start_idx = i
+                brace_count += 1
+            elif ch == '}':
+                if brace_count > 0:
+                    brace_count -= 1
+                    if brace_count == 0 and start_idx != -1:
+                        candidate = cleaned[start_idx:i+1]
+                        try:
+                            obj = json.loads(candidate)
+                            if isinstance(obj, dict) and "name" in obj:
+                                results.append(obj)
+                        except Exception:
+                            pass
+                        start_idx = -1
+        escape = False
+    return results
 
 
 def run_agent_loop(api_base, scenario_name="db_deadlock", max_turns=6):
