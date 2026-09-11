@@ -199,6 +199,9 @@ def main():
     tokenizer.save_pretrained(train_cfg["output_dir"])
     print(f"LoRA adapter saved to {train_cfg['output_dir']}")
 
+    if torch.distributed.is_initialized():
+        torch.distributed.destroy_process_group()
+
 
 if __name__ == "__main__":
     main()

@@ -26,7 +26,11 @@ def main():
     args = parser.parse_args()
 
     print(f"Loading base model {args.base_model} ...")
-    base_model = AutoModelForCausalLM.from_pretrained(args.base_model, dtype=torch.bfloat16)
+    base_model = AutoModelForCausalLM.from_pretrained(
+        args.base_model,
+        torch_dtype=torch.bfloat16,
+        device_map="auto",
+    )
     tokenizer = AutoTokenizer.from_pretrained(args.adapter)
 
     print(f"Loading LoRA adapter from {args.adapter} ...")
