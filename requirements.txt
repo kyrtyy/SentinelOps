@@ -1,0 +1,22 @@
+# Training-phase dependencies. Quantization/serving/agent phases will
+# add their own requirements files as those parts get built.
+torch>=2.5
+transformers>=4.57
+accelerate>=1.5
+peft>=0.14
+trl>=0.19          # need >=0.19 for native {"messages": ..., "tools": ...} SFT support
+datasets>=3.0
+pyyaml>=6.0
+wandb>=0.18
+
+# Flash Attention 2 - build against your installed torch/CUDA version.
+# If this wheel build fails, drop --attn_implementation to "sdpa" in
+# configs/train_lora_config.yaml and skip this line; training still
+# works, just somewhat slower.
+flash-attn>=2.6 --no-build-isolation
+
+# NOTE: trl moves fast and has broken backward compatibility on
+# SFTConfig kwargs more than once (e.g. max_seq_length -> max_length).
+# Run `pip install -U trl` and check
+# https://huggingface.co/docs/trl/sft_trainer if training errors on
+# an unrecognized argument.
