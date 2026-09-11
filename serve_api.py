@@ -90,18 +90,16 @@ def create_chat_completion(req: ChatCompletionRequest):
 
     response_text = tokenizer.decode(outputs[0][inputs.input_ids.shape[1]:], skip_special_tokens=False).strip()
 
-    # Clean end tokens if present
-    for stop_token in ["<|im_end|>", "<|endoftext|>"]:
-        if response_text.endswith(stop_token):
-            response_text = response_text[:-len(stop_token)].strip()
+    # Clean special tokens from response text
+    cleaned_text = response_text.replace("<|im_start|>", "").replace("<|im_end|>", "").replace("<|endoftext|>", "").strip()
 
     # Check if model produced tool calls in Qwen/standard format
     tool_calls = []
-    content = response_text
+    content = cleaned_text
 
-    # Parse <tool_call> tags if present
-    if "<tool_call>" in response_text:
-        parts = response_text.split("<tool_call>")
+    # 1. Parse <tool_call> tags if present
+    if "<tool_call>" in cleaned_text:
+        parts = cleaned_text.split("<tool_call>")
         content = parts[0].strip()
         for part in parts[1:]:
             if "</tool_call>" in part:
@@ -113,11 +111,27 @@ def create_chat_completion(req: ChatCompletionRequest):
                         "type": "function",
                         "function": {
                             "name": call_json.get("name"),
-                            "arguments": json.dumps(call_json.get("arguments", {})),
+                            "arguments": json.dumps(call_json.get("arguments", {})) if isinstance(call_json.get("arguments"), dict) else str(call_json.get("arguments", "{}")),
                         },
                     })
                 except Exception:
                     pass
+    # 2. Parse direct JSON if model emitted {"name": "...", "arguments": ...}
+    elif cleaned_text.startswith("{") and "name" in cleaned_text and "arguments" in cleaned_text:
+        try:
+            call_json = json.loads(cleaned_text)
+            if "name" in call_json and "arguments" in call_json:
+                tool_calls.append({
+                    "id": f"call_{uuid.uuid4().hex[:8]}",
+                    "type": "function",
+                    "function": {
+                        "name": call_json["name"],
+                        "arguments": json.dumps(call_json["arguments"]) if isinstance(call_json["arguments"], dict) else str(call_json["arguments"]),
+                    },
+                })
+                content = ""
+        except Exception:
+            pass
 
     message_obj = {"role": "assistant", "content": content}
     if tool_calls:
