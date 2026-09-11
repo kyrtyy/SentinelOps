@@ -54,6 +54,80 @@ def attach_tools_column(dataset):
     return dataset.add_column("tools", [TOOLS] * len(dataset))
 
 
+def build_sft_config(cfg, eval_dataset):
+    import dataclasses
+    import inspect
+
+    model_cfg = cfg["model"]
+    train_cfg = cfg["training"]
+    seq_len = model_cfg.get("max_seq_length", 4096)
+
+    # Base training arguments
+    kwargs = {
+        "output_dir": train_cfg["output_dir"],
+        "num_train_epochs": train_cfg.get("num_train_epochs", 3),
+        "per_device_train_batch_size": train_cfg.get("per_device_train_batch_size", 2),
+        "gradient_accumulation_steps": train_cfg.get("gradient_accumulation_steps", 8),
+        "learning_rate": float(train_cfg.get("learning_rate", 2e-4)),
+        "lr_scheduler_type": train_cfg.get("lr_scheduler_type", "cosine"),
+        "warmup_ratio": float(train_cfg.get("warmup_ratio", 0.03)),
+        "weight_decay": float(train_cfg.get("weight_decay", 0.01)),
+        "bf16": bool(train_cfg.get("bf16", True)),
+        "gradient_checkpointing": bool(train_cfg.get("gradient_checkpointing", True)),
+        "logging_steps": int(train_cfg.get("logging_steps", 10)),
+        "eval_strategy": (train_cfg.get("eval_strategy", "steps") if eval_dataset is not None else "no"),
+        "eval_steps": int(train_cfg.get("eval_steps", 50)),
+        "save_strategy": train_cfg.get("save_strategy", "steps"),
+        "save_steps": int(train_cfg.get("save_steps", 50)),
+        "save_total_limit": int(train_cfg.get("save_total_limit", 3)),
+        "seed": int(train_cfg.get("seed", 13)),
+        "assistant_only_loss": bool(train_cfg.get("assistant_only_loss", True)),
+        "packing": bool(train_cfg.get("packing", False)),
+        "report_to": train_cfg.get("report_to", "none"),
+        "run_name": train_cfg.get("run_name"),
+        "max_seq_length": seq_len,
+        "max_length": seq_len,
+    }
+
+    # Inspect valid fields for the installed SFTConfig version
+    valid_fields = set()
+    if dataclasses.is_dataclass(SFTConfig):
+        valid_fields = {f.name for f in dataclasses.fields(SFTConfig)}
+    else:
+        try:
+            sig = inspect.signature(SFTConfig.__init__)
+            valid_fields = set(sig.parameters.keys())
+        except Exception:
+            pass
+
+    if valid_fields:
+        filtered = {k: v for k, v in kwargs.items() if k in valid_fields}
+        # Deduplicate max_seq_length / max_length
+        if "max_seq_length" in filtered and "max_length" in filtered:
+            if "max_length" in valid_fields and "max_seq_length" not in valid_fields:
+                filtered.pop("max_seq_length", None)
+            else:
+                filtered.pop("max_length", None)
+        config = SFTConfig(**filtered)
+    else:
+        try:
+            config = SFTConfig(**kwargs)
+        except TypeError:
+            # Fallback minimal init
+            config = SFTConfig(output_dir=train_cfg["output_dir"])
+
+    # Ensure all attributes are assigned on the instance
+    for k, v in kwargs.items():
+        if k in ("max_length", "max_seq_length"):
+            continue
+        try:
+            setattr(config, k, v)
+        except Exception:
+            pass
+
+    return config
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", required=True, help="Path to train_lora_config.yaml")
@@ -109,30 +183,7 @@ def main():
             load_dataset("json", data_files=data_cfg["eval_file"], split="train")
         )
 
-    sft_config = SFTConfig(
-        output_dir=train_cfg["output_dir"],
-        max_length=model_cfg.get("max_seq_length", 4096),  # renamed from max_seq_length pre-trl-0.21
-        num_train_epochs=train_cfg.get("num_train_epochs", 3),
-        per_device_train_batch_size=train_cfg.get("per_device_train_batch_size", 2),
-        gradient_accumulation_steps=train_cfg.get("gradient_accumulation_steps", 8),
-        learning_rate=train_cfg.get("learning_rate", 2e-4),
-        lr_scheduler_type=train_cfg.get("lr_scheduler_type", "cosine"),
-        warmup_ratio=train_cfg.get("warmup_ratio", 0.03),
-        weight_decay=train_cfg.get("weight_decay", 0.01),
-        bf16=train_cfg.get("bf16", True),
-        gradient_checkpointing=train_cfg.get("gradient_checkpointing", True),
-        logging_steps=train_cfg.get("logging_steps", 10),
-        eval_strategy=(train_cfg.get("eval_strategy", "steps") if eval_dataset is not None else "no"),
-        eval_steps=train_cfg.get("eval_steps", 50),
-        save_strategy=train_cfg.get("save_strategy", "steps"),
-        save_steps=train_cfg.get("save_steps", 50),
-        save_total_limit=train_cfg.get("save_total_limit", 3),
-        seed=train_cfg.get("seed", 13),
-        assistant_only_loss=train_cfg.get("assistant_only_loss", True),
-        packing=train_cfg.get("packing", False),
-        report_to=train_cfg.get("report_to", "wandb"),
-        run_name=train_cfg.get("run_name"),
-    )
+    sft_config = build_sft_config(cfg, eval_dataset)
 
     trainer = SFTTrainer(
         model=model,
