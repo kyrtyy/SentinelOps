@@ -11,97 +11,65 @@ larger model acting as judge.
 - [x] **Training pipeline** - open-source & synthetic incident dataset, LoRA SFT (PyTorch DDP)
 - [x] **Model serving** - OpenAI-compatible server (`serve_api.py`), AWQ INT4 support
 - [x] **Agent orchestrator** - Autonomous multi-turn ReAct loop (`agent_orchestrator.py`), tool execution & RAG runbooks
-- [ ] Infrastructure (Terraform: VPC, EC2 spot, RDS+pgvector, Lambda, EventBridge)
-- [ ] Evaluation (Bedrock Claude 3.5 Sonnet as judge, latency/throughput benchmarks)
+- [x] **Evaluation benchmark** - Automated SRE scoring, LLM-as-a-Judge (`evaluate_benchmark.py`), scorecard generation
+- [x] **Infrastructure (Terraform)** - Modular AWS architecture: VPC, EC2 Spot GPU (A10G), RDS pgvector, EventBridge + Lambda
 
 ## Architecture at a glance
 
-- **Base model:** `Qwen/Qwen2.5-Coder-7B-Instruct` or `meta-llama/Llama-3.1-8B-Instruct`
-- **Fine-tuning:** LoRA via PEFT + TRL's `SFTTrainer`, `bfloat16`, FlashAttention-2,
-  distributed with `accelerate` DDP across 2x RTX 4090 (24GB)
-- **Quantization:** AWQ INT4 for vLLM serving on a single A10G (`g5.xlarge`)
-- **Serving:** vLLM, OpenAI-compatible endpoint
-- **RAG:** pgvector-backed runbook retrieval
-- **Orchestration:** ReAct agent loop, event-driven off CloudWatch alarms
-- **Evaluation:** Amazon Bedrock (Claude 3.5 Sonnet) as LLM-judge
+- **Base model:** `Qwen/Qwen2.5-Coder-7B-Instruct`
+- **Fine-tuning:** LoRA via PEFT + TRL's `SFTTrainer`, `bfloat16`, PyTorch native SDPA, distributed with `accelerate` DDP
+- **Serving:** OpenAI-compatible FastAPI server (`serve_api.py`) or vLLM
+- **RAG:** pgvector-backed runbook retrieval (`data/runbooks.jsonl`)
+- **Orchestration:** Multi-turn ReAct agent loop (`agent_orchestrator.py`), event-driven off CloudWatch alarms
+- **Evaluation:** LLM-as-a-Judge and automated ground-truth scoring (`evaluate_benchmark.py`)
+- **Cloud Infrastructure:** Terraform modules under `terraform/` for automated AWS deployment
 
-### Design notes
+## Pipeline & Commands
 
-A couple of deliberate departures from the "obvious" heavyweight choice,
-worth calling out since this is a showcase project:
-
-- **DDP instead of DeepSpeed ZeRO.** LoRA's trainable-parameter footprint is
-  tiny relative to the frozen base model, which comfortably fits on a single
-  24GB GPU in bf16. ZeRO-2/3 exists to shard models that don't fit in one
-  GPU's memory - using it here would add real complexity for no benefit.
-- **AWQ INT4 instead of FP8 for serving.** The target serving GPU (A10G,
-  Ampere) has no FP8 tensor cores; FP8 needs Hopper or Ada Lovelace. AWQ is
-  the correct - and only working - choice for this hardware.
-
-## Training pipeline
-
-### 1. Generate or Ingest SRE Incident Trajectories
-
-You can generate synthetic incidents, ingest open-source real-world SRE benchmarks (e.g. Hugging Face `quantranger/opensre-incident-trajectories` / curated real-world outages from AWS, Cloudflare, Slack, GitHub, Datadog), or blend both:
-
-**Option A: Generate Synthetic Incidents (Offline, zero API dependencies)**
+### 1. Data Ingestion & Generation
 ```bash
-python generate_synthetic_incidents.py \
-    --num-incidents 600 \
-    --output-dir data \
-    --seed 13
-```
+# Generate synthetic failure corpus
+python generate_synthetic_incidents.py --num-incidents 600 --output-dir data --seed 13
 
-**Option B: Ingest & Blend Open-Source SRE Trajectories (Real + Synthetic)**
-```bash
-# Ingests curated real-world failure cases and blends with synthetic traces
-python ingest_open_sre_data.py \
-    --output-dir data \
+# Blend open-source real-world SRE trajectories
+python ingest_open_sre_data.py --output-dir data \
     --synthetic-train data/incidents_train.jsonl \
-    --synthetic-val data/incidents_val.jsonl \
-    --include-hf
-```
+    --synthetic-val data/incidents_val.jsonl
 
-### 2. Format into Tool-Calling Conversations
-
-```bash
-python format_tool_calling_dataset.py \
-    --input data/incidents_train.jsonl --output data/sft_train.jsonl
-
-python format_tool_calling_dataset.py \
-    --input data/incidents_val.jsonl --output data/sft_val.jsonl \
-    --check-template Qwen/Qwen2.5-Coder-7B-Instruct
-```
-
-### 3. Ingest Runbooks & Post-Mortems for RAG
-
-Export structured post-mortems for indexing into pgvector (`query_vector_db`):
-```bash
+# Ingest runbooks & post-mortems for RAG
 python ingest_postmortems.py --output data/runbooks.jsonl
 ```
 
-### 4. Fine-tune
-
+### 2. Distributed Training & Checkpoint Merge
 ```bash
-pip install -r requirements.txt
-accelerate launch --config_file accelerate_config.yaml \
-    train_ddp.py --config train_lora_config.yaml
+# Launch multi-GPU LoRA SFT training
+accelerate launch --multi_gpu --mixed_precision bf16 train_ddp.py --config train_lora_config.yaml
+
+# Merge adapter into base weights
+python merge_lora.py --base-model Qwen/Qwen2.5-Coder-7B-Instruct --adapter outputs/sentinelops-lora --output outputs/sentinelops-merged
 ```
 
-Edit `train_lora_config.yaml` to switch base model, LoRA rank, or any
-training hyperparameter - `train_ddp.py` itself shouldn't need touching.
-
-### 5. Merge the Adapter
-
+### 3. Model Serving & Autonomous ReAct Agent
 ```bash
-python merge_lora.py \
-    --base-model Qwen/Qwen2.5-Coder-7B-Instruct \
-    --adapter outputs/sentinelops-lora \
-    --output outputs/sentinelops-merged
+# Start OpenAI-compatible API server
+python serve_api.py --model-path outputs/sentinelops-merged --port 8000
+
+# Run autonomous agent loop against test incidents
+python agent_orchestrator.py --api-base http://localhost:8000/v1 --scenario db_deadlock
 ```
 
-The merged checkpoint in `outputs/sentinelops-merged` is the input to the
-next phase (AWQ quantization + vLLM serving).
+### 4. Evaluation Benchmark (LLM-as-a-Judge)
+```bash
+python evaluate_benchmark.py --api-base http://localhost:8000/v1 --output benchmark_scorecard.md
+```
+
+### 5. AWS Cloud Infrastructure Deployment (Terraform)
+```bash
+cd terraform
+cp terraform.tfvars.example terraform.tfvars
+# Edit terraform.tfvars with your credentials, then run:
+./deploy.sh
+```
 
 ## Repository layout
 
@@ -112,9 +80,23 @@ sentinelops/
 ├── ingest_open_sre_data.py         # Ingests OpenSRE & real-world outage trajectories
 ├── ingest_postmortems.py           # Ingests post-mortems for RAG vector DB
 ├── format_tool_calling_dataset.py  # Multi-turn chat & tool-calling formatter
-├── accelerate_config.yaml          # Multi-GPU DDP training configuration
-├── train_lora_config.yaml          # Hyperparameters and dataset paths
 ├── train_ddp.py                    # Distributed LoRA SFT trainer
+├── train_lora_config.yaml          # Hyperparameters and dataset paths
 ├── merge_lora.py                   # LoRA adapter checkpoint merge utility
-└── requirements.txt
+├── quantize_awq.py                 # AWQ INT4 quantization utility
+├── serve_api.py                    # Lightweight OpenAI-compatible FastAPI model server
+├── test_agent_inference.py         # Standalone tool-calling inference tester
+├── agent_orchestrator.py           # Autonomous multi-turn ReAct agent loop
+├── evaluate_benchmark.py           # Evaluation benchmark & LLM-as-a-Judge scorer
+├── requirements.txt                # Python dependencies
+└── terraform/                      # AWS Cloud Infrastructure as Code
+    ├── main.tf                     # Root Terraform config
+    ├── variables.tf                # AWS region, DB, and instance variables
+    ├── outputs.tf                  # IP addresses, endpoints, and ARNs
+    ├── deploy.sh                   # One-click deployment script
+    └── modules/
+        ├── vpc/                    # Multi-AZ VPC and subnets
+        ├── ec2_spot/               # EC2 Spot GPU instance (NVIDIA A10G 24GB)
+        ├── rds_pgvector/           # RDS PostgreSQL + pgvector runbook store
+        └── eventbridge_lambda/     # CloudWatch Alarm EventBridge rule & Lambda trigger
 ```
