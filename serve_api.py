@@ -35,11 +35,50 @@ tokenizer = None
 model_name = ""
 
 
-class ChatMessage(BaseModel):
-    role: str
-    content: Optional[str] = ""
-    name: Optional[str] = None
-    tool_calls: Optional[List[Dict[str, Any]]] = None
+def extract_tool_calls_from_text(text: str) -> List[Dict[str, Any]]:
+    import re
+    if not text:
+        return []
+    cleaned = text.replace("<|im_start|>", "").replace("<|im_end|>", "").replace("<|endoftext|>", "").strip()
+    calls = []
+
+    # 1. Tagged <tool_call>...</tool_call>
+    tagged_matches = re.findall(r'<tool_call>(.*?)</tool_call>', cleaned, re.DOTALL)
+    for m in tagged_matches:
+        try:
+            data = json.loads(m.strip())
+            if "name" in data:
+                calls.append(data)
+        except Exception:
+            pass
+
+    if calls:
+        return calls
+
+    # 2. Markdown json blocks
+    md_matches = re.findall(r'```(?:json)?\s*(\{.*?\})\s*```', cleaned, re.DOTALL)
+    for m in md_matches:
+        try:
+            data = json.loads(m.strip())
+            if "name" in data and "arguments" in data:
+                calls.append(data)
+        except Exception:
+            pass
+
+    if calls:
+        return calls
+
+    # 3. Direct or embedded JSON with "name" and "arguments"
+    match = re.search(r'(\{[\s\S]*?"name"[\s\S]*?"arguments"[\s\S]*?\})', cleaned)
+    if match:
+        try:
+            data = json.loads(match.group(1))
+            if "name" in data and "arguments" in data:
+                calls.append(data)
+        except Exception:
+            pass
+
+    return calls
 
 
 class ChatCompletionRequest(BaseModel):
@@ -90,48 +129,24 @@ def create_chat_completion(req: ChatCompletionRequest):
 
     response_text = tokenizer.decode(outputs[0][inputs.input_ids.shape[1]:], skip_special_tokens=False).strip()
 
-    # Clean special tokens from response text
     cleaned_text = response_text.replace("<|im_start|>", "").replace("<|im_end|>", "").replace("<|endoftext|>", "").strip()
+    extracted_calls = extract_tool_calls_from_text(response_text)
 
-    # Check if model produced tool calls in Qwen/standard format
     tool_calls = []
-    content = cleaned_text
+    content = ""
 
-    # 1. Parse <tool_call> tags if present
-    if "<tool_call>" in cleaned_text:
-        parts = cleaned_text.split("<tool_call>")
-        content = parts[0].strip()
-        for part in parts[1:]:
-            if "</tool_call>" in part:
-                call_str = part.split("</tool_call>")[0].strip()
-                try:
-                    call_json = json.loads(call_str)
-                    tool_calls.append({
-                        "id": f"call_{uuid.uuid4().hex[:8]}",
-                        "type": "function",
-                        "function": {
-                            "name": call_json.get("name"),
-                            "arguments": json.dumps(call_json.get("arguments", {})) if isinstance(call_json.get("arguments"), dict) else str(call_json.get("arguments", "{}")),
-                        },
-                    })
-                except Exception:
-                    pass
-    # 2. Parse direct JSON if model emitted {"name": "...", "arguments": ...}
-    elif cleaned_text.startswith("{") and "name" in cleaned_text and "arguments" in cleaned_text:
-        try:
-            call_json = json.loads(cleaned_text)
-            if "name" in call_json and "arguments" in call_json:
-                tool_calls.append({
-                    "id": f"call_{uuid.uuid4().hex[:8]}",
-                    "type": "function",
-                    "function": {
-                        "name": call_json["name"],
-                        "arguments": json.dumps(call_json["arguments"]) if isinstance(call_json["arguments"], dict) else str(call_json["arguments"]),
-                    },
-                })
-                content = ""
-        except Exception:
-            pass
+    if extracted_calls:
+        for c in extracted_calls:
+            tool_calls.append({
+                "id": f"call_{uuid.uuid4().hex[:8]}",
+                "type": "function",
+                "function": {
+                    "name": c.get("name"),
+                    "arguments": json.dumps(c.get("arguments", {})) if isinstance(c.get("arguments"), dict) else str(c.get("arguments", "{}")),
+                },
+            })
+    else:
+        content = cleaned_text
 
     message_obj = {"role": "assistant", "content": content}
     if tool_calls:

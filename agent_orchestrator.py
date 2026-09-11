@@ -183,6 +183,52 @@ def call_model_api(api_base, messages, tools):
         return json.loads(resp.read().decode("utf-8"))
 
 
+def extract_tool_calls_from_text(text: str):
+    import re
+    if not text:
+        return []
+    cleaned = text.replace("<|im_start|>", "").replace("<|im_end|>", "").replace("<|endoftext|>", "").strip()
+    calls = []
+
+    # 1. Tagged <tool_call>...</tool_call>
+    tagged_matches = re.findall(r'<tool_call>(.*?)</tool_call>', cleaned, re.DOTALL)
+    for m in tagged_matches:
+        try:
+            data = json.loads(m.strip())
+            if "name" in data:
+                calls.append(data)
+        except Exception:
+            pass
+
+    if calls:
+        return calls
+
+    # 2. Markdown json blocks
+    md_matches = re.findall(r'```(?:json)?\s*(\{.*?\})\s*```', cleaned, re.DOTALL)
+    for m in md_matches:
+        try:
+            data = json.loads(m.strip())
+            if "name" in data and "arguments" in data:
+                calls.append(data)
+        except Exception:
+            pass
+
+    if calls:
+        return calls
+
+    # 3. Direct or embedded JSON with "name" and "arguments"
+    match = re.search(r'(\{[\s\S]*?"name"[\s\S]*?"arguments"[\s\S]*?\})', cleaned)
+    if match:
+        try:
+            data = json.loads(match.group(1))
+            if "name" in data and "arguments" in data:
+                calls.append(data)
+        except Exception:
+            pass
+
+    return calls
+
+
 def run_agent_loop(api_base, scenario_name="db_deadlock", max_turns=6):
     scenario = TEST_SCENARIOS.get(scenario_name, TEST_SCENARIOS["db_deadlock"])
     dispatcher = ToolDispatcher(scenario)
@@ -207,11 +253,23 @@ def run_agent_loop(api_base, scenario_name="db_deadlock", max_turns=6):
         content = message.get("content", "")
         tool_calls = message.get("tool_calls", [])
 
+        # If no tool_calls field, try extracting from content
+        if not tool_calls and content:
+            extracted = extract_tool_calls_from_text(content)
+            if extracted:
+                tool_calls = [{
+                    "type": "function",
+                    "function": {
+                        "name": c["name"],
+                        "arguments": c.get("arguments", {}),
+                    }
+                } for c in extracted]
+
         # Check if the model emitted a tool call
         if tool_calls:
             messages.append({
                 "role": "assistant",
-                "content": content or "",
+                "content": "",
                 "tool_calls": tool_calls,
             })
 
@@ -226,31 +284,6 @@ def run_agent_loop(api_base, scenario_name="db_deadlock", max_turns=6):
                     "content": tool_result,
                 })
 
-        # Check if model produced raw JSON call in content
-        elif content and "{" in content and "name" in content and "arguments" in content:
-            try:
-                call_json = json.loads(content.replace("<|im_start|>", "").replace("<|im_end|>", "").strip())
-                fn_name = call_json["name"]
-                fn_args = call_json["arguments"]
-                tool_result = dispatcher.execute(fn_name, fn_args)
-
-                messages.append({
-                    "role": "assistant",
-                    "content": content,
-                })
-                messages.append({
-                    "role": "tool",
-                    "name": fn_name,
-                    "content": tool_result,
-                })
-            except Exception:
-                # Text resolution
-                print("\n" + "=" * 70)
-                print("🎯 [INCIDENT RESOLUTION REPORT]")
-                print("=" * 70)
-                print(content.replace("<|im_start|>", "").replace("<|im_end|>", "").strip())
-                print("=" * 70)
-                break
         else:
             # Final text resolution reached
             print("\n" + "=" * 70)
